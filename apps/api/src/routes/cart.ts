@@ -20,13 +20,23 @@ cartRouter.get('/', async (_req, res) => {
 cartRouter.post('/items', async (req, res) => {
   const productId = positiveId(req.body?.productId);
   const quantity = positiveQuantity(req.body?.quantity);
-  const [products] = await getPool().execute<ProductRow[]>('SELECT id, stock FROM products WHERE id = ? AND is_active = 1', [productId]);
-  if (!products[0]) throw new HttpError(404, 'NOT_FOUND', '商品不存在');
-  const [existing] = await getPool().execute<RowDataPacket[]>('SELECT quantity FROM cart_items WHERE user_id = ? AND product_id = ?', [res.locals.userId, productId]);
-  const nextQuantity = Number(existing[0]?.quantity || 0) + quantity;
-  if (nextQuantity > 99 || nextQuantity > products[0].stock) throw new HttpError(409, 'OUT_OF_STOCK', '库存不足或购买数量过多');
-  await getPool().execute('INSERT INTO cart_items (user_id, product_id, quantity) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE quantity = VALUES(quantity)', [res.locals.userId, productId, nextQuantity]);
-  res.status(201).json({ productId, quantity: nextQuantity });
+  const connection = await getPool().getConnection();
+  try {
+    await connection.beginTransaction();
+    const [products] = await connection.execute<ProductRow[]>('SELECT id, stock FROM products WHERE id = ? AND is_active = 1 FOR UPDATE', [productId]);
+    if (!products[0]) throw new HttpError(404, 'NOT_FOUND', '商品不存在');
+    const [existing] = await connection.execute<RowDataPacket[]>('SELECT quantity FROM cart_items WHERE user_id = ? AND product_id = ?', [res.locals.userId, productId]);
+    const nextQuantity = Number(existing[0]?.quantity || 0) + quantity;
+    if (nextQuantity > 99 || nextQuantity > products[0].stock) throw new HttpError(409, 'OUT_OF_STOCK', '库存不足或购买数量过多');
+    await connection.execute('INSERT INTO cart_items (user_id, product_id, quantity) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE quantity = VALUES(quantity)', [res.locals.userId, productId, nextQuantity]);
+    await connection.commit();
+    res.status(201).json({ productId, quantity: nextQuantity });
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
 });
 
 cartRouter.patch('/items/:productId', async (req, res) => {

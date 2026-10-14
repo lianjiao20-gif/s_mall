@@ -1,4 +1,4 @@
-import { Link, NavLink, Route, Routes, useNavigate } from 'react-router-dom';
+import { Link, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { ArrowUpRight, Menu, ShoppingBag, UserRound } from 'lucide-react';
 import { useAuth } from './auth';
 import Home from './pages/Home';
@@ -10,11 +10,13 @@ import Orders from './pages/Orders';
 export default function App() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const activeCategory = new URLSearchParams(location.search).get('category') || '';
   return <div className="site-shell">
     <div className="announcement">认真挑选的日常好物 · 满 ¥299 享包邮 <ArrowUpRight size={13}/></div>
     <header className="site-header">
       <Link to="/" className="brand" aria-label="拾间首页"><span className="brand-mark">拾</span><span>拾间<small>THE SLOW STORE</small></span></Link>
-      <nav className="desktop-nav" aria-label="主导航"><NavLink to="/">全部商品</NavLink><NavLink to="/?category=居家">居家生活</NavLink><NavLink to="/?category=配饰">随行配饰</NavLink><NavLink to="/?category=文具">文具纸品</NavLink></nav>
+      <nav className="desktop-nav" aria-label="主导航"><Link className={location.pathname === '/' && !activeCategory ? 'active' : ''} to="/">全部商品</Link><Link className={activeCategory === '居家' ? 'active' : ''} to="/?category=居家">居家生活</Link><Link className={activeCategory === '配饰' ? 'active' : ''} to="/?category=配饰">随行配饰</Link><Link className={activeCategory === '文具' ? 'active' : ''} to="/?category=文具">文具纸品</Link></nav>
       <div className="header-actions">
         <Link to={user ? '/orders' : '/login'} className="icon-link" aria-label={user ? '我的订单' : '登录'}><UserRound size={21}/><span>{user ? user.name : '登录'}</span></Link>
         <Link to="/cart" className="icon-link" aria-label="购物车"><ShoppingBag size={21}/><span>购物车</span></Link>
