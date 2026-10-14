@@ -1,0 +1,19 @@
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: smalldemo
+      MYSQL_USER: smalldemo
+      MYSQL_PASSWORD: smalldemo
+      MYSQL_ROOT_PASSWORD: localroot
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -plocalroot"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+volumes:
+  mysql_data:

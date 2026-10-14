@@ -1,0 +1,15 @@
+import { useEffect, useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { ArrowLeft, ArrowRight, Minus, Plus, Truck } from 'lucide-react';
+import { api, money, type Product } from '../api';
+import { useAuth } from '../auth';
+
+export default function ProductPage() {
+  const { id } = useParams(); const navigate = useNavigate(); const { user } = useAuth();
+  const [product, setProduct] = useState<Product | null>(null); const [loading, setLoading] = useState(true); const [error, setError] = useState(''); const [quantity, setQuantity] = useState(1); const [busy, setBusy] = useState(false); const [notice, setNotice] = useState('');
+  useEffect(() => { api<{ product: Product }>(`/products/${id}`).then(data => setProduct(data.product)).catch(err => setError(err.message)).finally(() => setLoading(false)); }, [id]);
+  async function addToCart() { if (!product) return; if (!user) { navigate('/login?next=' + encodeURIComponent(`/products/${id}`)); return; } setBusy(true); setNotice(''); try { await api('/cart/items', { method: 'POST', body: JSON.stringify({ productId: product.id, quantity }) }); setNotice('已加入购物车'); } catch (err) { setNotice((err as Error).message); } finally { setBusy(false); } }
+  if (loading) return <div className="container state-panel page-state">正在加载商品…</div>;
+  if (error || !product) return <div className="container state-panel page-state error">{error || '商品不存在'}<Link to="/">返回首页</Link></div>;
+  return <div className="container product-page"><div className="breadcrumbs"><Link to="/">首页</Link><span>/</span><span>{product.category}</span><span>/</span><span>{product.name}</span></div><div className="detail-grid"><div className="detail-image"><img src={product.imagePath} alt={product.name}/><span>CURATED WITH CARE / 0{product.id}</span></div><div className="detail-info"><div className="eyebrow">THE SLOW STORE / {product.category}</div><h1>{product.name}</h1><p className="detail-desc">{product.description}</p><div className="detail-price">{money(product.priceCents)}</div><div className="detail-divider"/><div className="detail-stock">{product.stock > 0 ? `现货 · 剩余 ${product.stock} 件` : '暂时售罄'}</div><div className="quantity-heading">购买数量</div><div className="buy-controls"><div className="quantity-control"><button aria-label="减少数量" onClick={() => setQuantity(Math.max(1, quantity - 1))}><Minus size={16}/></button><span aria-label="当前数量">{quantity}</span><button aria-label="增加数量" onClick={() => setQuantity(Math.min(Math.min(99, product.stock), quantity + 1))}><Plus size={16}/></button></div><button className="button primary add-button" onClick={addToCart} disabled={busy || product.stock === 0}>{busy ? '正在加入…' : '加入购物车'} <ArrowRight size={18}/></button></div>{notice && <p className="feedback" role="status">{notice} {notice === '已加入购物车' && <Link to="/cart">去购物车 →</Link>}</p>}<div className="detail-perks"><Truck size={18}/><span>满 ¥299 包邮 · 演示项目无真实发货</span></div><Link className="back-link" to="/"><ArrowLeft size={16}/> 返回全部商品</Link></div></div></div>;
+}

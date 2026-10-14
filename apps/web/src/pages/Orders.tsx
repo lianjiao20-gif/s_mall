@@ -1,0 +1,13 @@
+import { useEffect, useState } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { ArrowRight, CheckCircle2, Package } from 'lucide-react';
+import { api, money, type Order } from '../api';
+import { useAuth } from '../auth';
+
+export default function Orders() {
+  const { user, loading: authLoading } = useAuth(); const navigate = useNavigate(); const [params] = useSearchParams();
+  const [orders, setOrders] = useState<Order[]>([]); const [selected, setSelected] = useState<Order | null>(null); const [loading, setLoading] = useState(true); const [error, setError] = useState('');
+  useEffect(() => { if (authLoading) return; if (!user) { navigate('/login?next=%2Forders'); return; } api<{ orders: Order[] }>('/orders').then(data => setOrders(data.orders)).catch(err => setError(err.message)).finally(() => setLoading(false)); }, [user, authLoading, navigate]);
+  async function showOrder(id: number) { try { const data = await api<{ order: Order }>(`/orders/${id}`); setSelected(data.order); } catch (err) { setError((err as Error).message); } }
+  return <div className="container content-page"><div className="eyebrow">YOUR ORDERS <span className="eyebrow-line"/></div><div className="page-title-row"><h1>我的订单</h1><span>{orders.length} 笔订单</span></div>{params.get('created') && <div className="success-banner" role="status"><CheckCircle2 size={20}/><span>订单提交成功！模拟支付已完成，感谢你的选择。</span></div>}{error && <div className="form-error" role="alert">{error}</div>}{loading || authLoading ? <div className="state-panel">正在加载订单…</div> : orders.length === 0 ? <div className="state-panel cart-empty"><Package size={36}/><h2>还没有订单</h2><p>第一件喜欢的东西，正在等你发现。</p><Link className="button primary" to="/">去逛逛 <ArrowRight size={17}/></Link></div> : <div className="orders-list">{orders.map(order => <article className="order-card" key={order.id}><div className="order-card-top"><div><span className="eyebrow">ORDER NO. {String(order.id).padStart(6, '0')}</span><h2>订单 #{order.id}</h2></div><span className="status-pill">模拟支付完成</span></div><div className="order-card-bottom"><span>{new Date(order.createdAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}</span><strong>{money(order.totalCents)}</strong><button onClick={() => showOrder(order.id)}>查看明细 <ArrowRight size={16}/></button></div>{selected?.id === order.id && <div className="order-details">{selected.items?.map(item => <div key={item.productId}><span>{item.name} × {item.quantity}</span><strong>{money(item.priceCents * item.quantity)}</strong></div>)}</div>}</article>)}</div>}<Link className="back-link" to="/">← 继续购物</Link></div>;
+}
