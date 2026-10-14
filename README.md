@@ -44,6 +44,8 @@ MySQL 首次启动需要几秒。如果 `db:seed` 报连接失败，请等待容
 
 ## API 概览
 
+交互式 Swagger 文档：[http://localhost:3001/api/docs](http://localhost:3001/api/docs)。可点击 **Authorize**，填入登录接口返回的 `token`（不用添加 `Bearer` 前缀），然后使用 **Try it out** 调试需要登录的接口。机器可读的 OpenAPI 3.0 文档位于 [http://localhost:3001/api/openapi.json](http://localhost:3001/api/openapi.json)。
+
 所有接口以 `/api` 开头，响应为 JSON。登录后将返回的 `token` 作为 `Authorization: Bearer <token>` 请求头发送。金额字段以整数分表示，例如 `8900` 表示 ¥89.00。错误响应为 `{ "error": { "code": "...", "message": "..." } }`。
 
 | 方法 | 路径 | 说明 | 登录 |
