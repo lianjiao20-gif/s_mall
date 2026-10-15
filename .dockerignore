@@ -1,0 +1,13 @@
+.git
+.superpowers
+.DS_Store
+**/.DS_Store
+node_modules
+**/node_modules
+dist
+**/dist
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+!.env.production.example
