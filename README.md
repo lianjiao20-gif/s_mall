@@ -118,3 +118,40 @@ docker compose --env-file .env.production -f compose.prod.yaml logs -f --tail=10
 ```
 
 后续更新只需重新上传代码，在服务器目录执行 `docker compose --env-file .env.production -f compose.prod.yaml up -d --build --wait`，等待三个容器恢复健康后再访问网站。Compose 会重建有变化的镜像，MySQL 命名卷和订单数据会保留。停止服务使用 `docker compose --env-file .env.production -f compose.prod.yaml down`；该命令保留卷。上线前请确认服务器本身可以拉取 `node:24-alpine`、`caddy:2-alpine` 和 `mysql:8.4` 基础镜像。
+
+## 从腾讯云 TCR 拉取镜像部署
+
+如果不想把源码上传服务器，使用 `compose.tcr.yaml`。它只拉取镜像，不包含 `build`。前端镜像推送至 `ccr.ccs.tencentyun.com/dev-s-mall-image/s_mall_web`，API 镜像推送至 `ccr.ccs.tencentyun.com/dev-s-mall-image/s_mall_api`，两个仓库使用相同版本标签。确保命名空间和仓库已创建，并在本机登录 TCR。仓库凭据不要写进 `.env.production` 或命令参数。
+
+在本机仓库目录构建并推送两种 CPU 架构的应用镜像。每次发布使用新的版本标签，并把命令输出的标签填进服务器 `.env.production`：
+
+```bash
+VERSION=$(git rev-parse --short HEAD)
+docker buildx build --platform linux/amd64,linux/arm64 \
+  --build-arg NODE_IMAGE=public.ecr.aws/docker/library/node:24-alpine \
+  -f apps/api/Dockerfile \
+  -t "ccr.ccs.tencentyun.com/dev-s-mall-image/s_mall_api:${VERSION}" --push .
+docker buildx build --platform linux/amd64,linux/arm64 \
+  --build-arg NODE_IMAGE=public.ecr.aws/docker/library/node:24-alpine \
+  --build-arg CADDY_IMAGE=public.ecr.aws/docker/library/caddy:2-alpine \
+  -f apps/web/Dockerfile \
+  -t "ccr.ccs.tencentyun.com/dev-s-mall-image/s_mall_web:${VERSION}" --push .
+```
+
+服务器只需要 `compose.tcr.yaml` 和 `.env.production.example`，无需源码或 Node.js。将它们传到服务器后，在服务器执行：
+
+```bash
+ssh USER@SERVER_IP 'mkdir -p ~/s-mall'
+scp compose.tcr.yaml .env.production.example USER@SERVER_IP:~/s-mall/
+ssh USER@SERVER_IP
+cd ~/s-mall
+cp .env.production.example .env.production
+${EDITOR:-vi} .env.production
+docker login ccr.ccs.tencentyun.com
+docker compose --env-file .env.production -f compose.tcr.yaml pull
+docker compose --env-file .env.production -f compose.tcr.yaml up -d --wait mysql
+docker compose --env-file .env.production -f compose.tcr.yaml run --rm api node dist/seed.js
+docker compose --env-file .env.production -f compose.tcr.yaml up -d --wait
+```
+
+将 `API_IMAGE`、`WEB_IMAGE` 填为刚推送的完整镜像地址，`SITE_ADDRESS` 和数据库密钥按上一节填写。服务器上的私有仓库需要单独登录；本机登录状态不会随文件传输。MySQL 默认仍从 Docker Hub 拉取 `mysql:8.4`；若服务器不能访问 Docker Hub，可将该镜像镜像到可访问的仓库并填写 `MYSQL_IMAGE`。更新时替换两个应用镜像标签，执行 `docker compose --env-file .env.production -f compose.tcr.yaml pull api web` 和 `docker compose --env-file .env.production -f compose.tcr.yaml up -d --wait`。数据库卷不随镜像更新删除；不要执行 `down -v` 或 `db:reset`。
