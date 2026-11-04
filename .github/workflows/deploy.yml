@@ -1,0 +1,73 @@
+name: Deploy to server
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+      DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+      DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Test and build
+        run: |
+          npm ci
+          npm test
+          npm run build
+
+      - name: Configure SSH
+        run: |
+          test -n "$DEPLOY_HOST"
+          test -n "$DEPLOY_USER"
+          test -n "$DEPLOY_SSH_KEY"
+          test -n "$DEPLOY_KNOWN_HOSTS"
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$HOME/.ssh/id_ed25519"
+          chmod 600 "$HOME/.ssh/id_ed25519"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Upload source
+        run: |
+          target="${DEPLOY_USER}@${DEPLOY_HOST}"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$target" 'mkdir -p ~/s-mall'
+          rsync -az \
+            -e 'ssh -o BatchMode=yes -o StrictHostKeyChecking=yes' \
+            --exclude='.git/' \
+            --exclude='node_modules/' \
+            --exclude='dist/' \
+            --exclude='.env*' \
+            --exclude='.venv/' \
+            --exclude='.superpowers/' \
+            --exclude='.DS_Store' \
+            ./ "$target:~/s-mall/"
+
+      - name: Build and restart application
+        run: |
+          target="${DEPLOY_USER}@${DEPLOY_HOST}"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$target" \
+            'cd ~/s-mall && test -f .env.production && docker compose --env-file .env.production -f compose.prod.yaml up -d --build --wait api web && docker compose --env-file .env.production -f compose.prod.yaml ps'

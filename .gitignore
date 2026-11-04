@@ -1,7 +1,31 @@
+# Dependencies and build output
 node_modules/
 dist/
+coverage/
+.nyc_output/
+.vite/
 *.tsbuildinfo
-.env
-.env.production
+
+# Local configuration and secrets; keep shareable templates
+.env*
+!.env.example
+!.env.production.example
+
+# Logs and temporary files
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.tmp
+
+# Local tooling
 .superpowers/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# Operating system files
 .DS_Store
+Thumbs.db

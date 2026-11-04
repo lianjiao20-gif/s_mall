@@ -122,6 +122,23 @@ docker compose --env-file .env.production -f compose.prod.yaml logs -f --tail=10
 
 后续更新只需重新上传代码，在服务器目录执行 `docker compose --env-file .env.production -f compose.prod.yaml up -d --build --wait`，等待三个容器恢复健康后再访问网站。Compose 会重建有变化的镜像，MySQL 命名卷和订单数据会保留。停止服务使用 `docker compose --env-file .env.production -f compose.prod.yaml down`；该命令保留卷。上线前请确认服务器本身可以拉取 `node:24-alpine`、`caddy:2-alpine` 和 `mysql:8.4` 基础镜像。
 
+### GitHub Actions 自动部署
+
+`.github/workflows/deploy.yml` 在代码推送到 `main` 时自动运行，也可以在 GitHub 的 **Actions → Deploy to server → Run workflow** 手动运行。它会先执行 `npm ci`、`npm test` 和 `npm run build`，再通过 SSH/rsync 上传源码，并在服务器重建 `api`、`web` 容器。此流程使用上面的 `compose.prod.yaml` 源码部署方式；如果服务器使用 `compose.tcr.yaml`，请改用下节的镜像发布流程。
+
+先按上面的步骤在服务器完成首次部署，确认 `~/s-mall/.env.production` 已配置、Docker Compose 可运行。给 Actions 准备一个只用于部署的 SSH 密钥，将公钥加入服务器部署用户的 `~/.ssh/authorized_keys`；私钥只放在 GitHub Secrets。使用可信渠道核对服务器 SSH 主机公钥指纹后，将对应的 `known_hosts` 记录也放入 Secrets。
+
+在仓库 **Settings → Secrets and variables → Actions** 添加以下四个 Repository secrets：
+
+| Secret | 内容 |
+| --- | --- |
+| `DEPLOY_HOST` | 服务器公网 IP 或域名（不含 `user@`） |
+| `DEPLOY_USER` | 有权运行 Docker Compose 的 SSH 用户 |
+| `DEPLOY_SSH_KEY` | 部署专用 SSH 私钥的完整内容 |
+| `DEPLOY_KNOWN_HOSTS` | 经核对的服务器 SSH `known_hosts` 记录 |
+
+工作流不会上传或覆盖服务器的 `.env.production`，也不会执行数据库重置或删除 Docker 数据卷。服务器构建镜像仍需能获取 Dockerfile 中的基础镜像。首次启用前，先确认推送到 `main` 的代码已准备好部署。
+
 ## 从腾讯云 TCR 拉取镜像部署
 
 如果不想把源码上传服务器，使用 `compose.tcr.yaml`。它只拉取镜像，不包含 `build`。前端镜像推送至 `ccr.ccs.tencentyun.com/dev-s-mall-image/s_mall_web`，API 镜像推送至 `ccr.ccs.tencentyun.com/dev-s-mall-image/s_mall_api`，两个仓库使用相同版本标签。确保命名空间和仓库已创建，并在本机登录 TCR。仓库凭据不要写进 `.env.production` 或命令参数。
