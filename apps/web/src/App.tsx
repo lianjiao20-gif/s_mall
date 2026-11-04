@@ -4,6 +4,7 @@ import { useAuth } from './auth';
 import Home from './pages/Home';
 import ProductPage from './pages/Product';
 import Login from './pages/Login';
+import Register from './pages/Register';
 import Cart from './pages/Cart';
 import Orders from './pages/Orders';
 
@@ -27,6 +28,7 @@ export default function App() {
       <Route path="/" element={<Home/>}/>
       <Route path="/products/:id" element={<ProductPage/>}/>
       <Route path="/login" element={<Login/>}/>
+      <Route path="/register" element={<Register/>}/>
       <Route path="/cart" element={<Cart/>}/>
       <Route path="/orders" element={<Orders/>}/>
       <Route path="*" element={<section className="container empty-page"><h1>页面走丢了</h1><Link className="button primary" to="/">返回首页</Link></section>}/>

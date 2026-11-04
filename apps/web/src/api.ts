@@ -15,7 +15,7 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
   if (response.status === 204) return undefined as T;
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
-    if (response.status === 401 && path !== '/auth/login') localStorage.removeItem('shop_token');
+    if (response.status === 401 && path !== '/auth/login' && path !== '/auth/register') localStorage.removeItem('shop_token');
     throw new ApiError(response.status, body.error?.message || '请求失败，请稍后再试');
   }
   return body as T;

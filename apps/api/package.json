@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc -p tsconfig.json",
+    "test": "node --import tsx --test src/*.test.ts",
     "start": "node dist/server.js",
     "db:seed": "tsx src/seed.ts",
     "db:reset": "tsx src/seed.ts --reset"

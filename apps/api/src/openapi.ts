@@ -19,13 +19,13 @@ export const openApiDocument = {
   openapi: '3.0.3',
   info: {
     title: '拾间电商 API',
-    version: '1.0.0',
-    description: '本地演示商城的 REST API。金额统一以整数分表示；下单仅模拟支付。先调用登录接口取得 token，再点击右上角 Authorize 输入 token（无需手动添加 Bearer 前缀）。'
+    version: '1.1.0',
+    description: '本地演示商城的 REST API。金额统一以整数分表示；下单仅模拟支付。可调用注册或登录接口取得 token，再点击右上角 Authorize 输入 token（无需手动添加 Bearer 前缀）。'
   },
   servers: [{ url: '/', description: '当前服务' }],
   tags: [
     { name: '系统', description: '服务状态' },
-    { name: '认证', description: '演示账号登录与当前用户' },
+    { name: '认证', description: '账号注册、登录与当前用户' },
     { name: '商品', description: '浏览和筛选商品' },
     { name: '购物车', description: '当前用户的购物车' },
     { name: '订单', description: '模拟下单和本人订单查询' }
@@ -35,6 +35,19 @@ export const openApiDocument = {
       get: {
         tags: ['系统'], summary: '健康检查', operationId: 'getHealth',
         responses: { 200: jsonResponse('API 服务运行中', ref('HealthResponse'), { status: 'ok' }), default: serverError }
+      }
+    },
+    '/api/auth/register': {
+      post: {
+        tags: ['认证'], summary: '注册账号', operationId: 'register',
+        description: '创建账号并返回有效期为 7 天的 JWT。邮箱不区分大小写。',
+        requestBody: { required: true, content: { 'application/json': { schema: ref('RegisterRequest'), example: { name: '小明', email: 'new@example.com', password: 'Password123!' } } } },
+        responses: {
+          201: jsonResponse('注册成功', ref('LoginResponse')),
+          400: errorResponse('注册信息不合法', 'INVALID_EMAIL', '请输入有效的邮箱地址'),
+          409: errorResponse('邮箱已被注册', 'EMAIL_EXISTS', '该邮箱已注册，请直接登录'),
+          default: serverError
+        }
       }
     },
     '/api/auth/login': {
@@ -134,13 +147,14 @@ export const openApiDocument = {
     }
   },
   components: {
-    securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT', description: '填写登录接口返回的 token，Swagger UI 会自动加上 Bearer 前缀。' } },
+    securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT', description: '填写注册或登录接口返回的 token，Swagger UI 会自动加上 Bearer 前缀。' } },
     schemas: {
       HealthResponse: { type: 'object', required: ['status'], properties: { status: { type: 'string', enum: ['ok'] } } },
       ErrorResponse: { type: 'object', required: ['error'], properties: { error: { type: 'object', required: ['code', 'message'], properties: { code: { type: 'string', example: 'NOT_FOUND' }, message: { type: 'string', example: '商品不存在' } } } } },
       User: { type: 'object', required: ['id', 'email', 'name'], properties: { id: { type: 'integer', example: 1 }, email: { type: 'string', format: 'email', example: 'demo@example.com' }, name: { type: 'string', example: '演示用户' } } },
       UserResponse: { type: 'object', required: ['user'], properties: { user: ref('User') } },
       LoginRequest: { type: 'object', required: ['email', 'password'], properties: { email: { type: 'string', format: 'email', example: 'demo@example.com' }, password: { type: 'string', format: 'password', example: 'Demo123456!' } } },
+      RegisterRequest: { type: 'object', required: ['name', 'email', 'password'], properties: { name: { type: 'string', minLength: 1, maxLength: 100, example: '小明' }, email: { type: 'string', format: 'email', maxLength: 254, example: 'new@example.com' }, password: { type: 'string', format: 'password', minLength: 8, description: '8 至 72 字节', example: 'Password123!' } } },
       LoginResponse: { type: 'object', required: ['token', 'user'], properties: { token: { type: 'string', description: '7 天有效的 JWT', example: 'eyJhbGciOiJIUzI1NiIs...' }, user: ref('User') } },
       Product: { type: 'object', required: ['id', 'name', 'description', 'category', 'priceCents', 'stock', 'imagePath'], properties: { id: { type: 'integer', example: 1 }, name: { type: 'string', example: '云朵陶瓷杯' }, description: { type: 'string', example: '一只适合慢慢喝咖啡的手作质感陶瓷杯。' }, category: { type: 'string', example: '居家' }, priceCents: { type: 'integer', minimum: 0, description: '人民币分', example: 8900 }, stock: { type: 'integer', minimum: 0, example: 25 }, imagePath: { type: 'string', example: '/images/cup.svg' } } },
       ProductResponse: { type: 'object', required: ['product'], properties: { product: ref('Product') } },

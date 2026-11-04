@@ -4,9 +4,15 @@ import bcrypt from 'bcryptjs';
 import { getPool } from '../db.js';
 import { signToken, requireUser } from '../auth.js';
 import { HttpError } from '../http.js';
+import { registerUser } from '../register.js';
 
 interface UserRow extends RowDataPacket { id: number; email: string; name: string; password_hash: string }
 export const authRouter = Router();
+
+authRouter.post('/register', async (req, res) => {
+  const user = await registerUser(req.body || {});
+  res.status(201).json({ token: signToken(user.id), user });
+});
 
 authRouter.post('/login', async (req, res) => {
   const { email, password } = req.body || {};
