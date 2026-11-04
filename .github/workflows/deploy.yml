@@ -1,4 +1,4 @@
-name: Deploy to server
+name: Deploy images to Tencent Cloud
 
 on:
   push:
@@ -14,18 +14,34 @@ concurrency:
 
 jobs:
   deploy:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     env:
-      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-      DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-      DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+      REGISTRY: ccr.ccs.tencentyun.com
+      API_IMAGE: ccr.ccs.tencentyun.com/dev-s-mall-image/s_mall_api:${{ github.sha }}
+      WEB_IMAGE: ccr.ccs.tencentyun.com/dev-s-mall-image/s_mall_web:${{ github.sha }}
     steps:
       - name: Check out source
         uses: actions/checkout@v6
         with:
           persist-credentials: false
+
+      - name: Check deployment secrets
+        env:
+          TCR_USERNAME: ${{ secrets.TCR_USERNAME }}
+          TCR_PASSWORD: ${{ secrets.TCR_PASSWORD }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          test -n "$TCR_USERNAME"
+          test -n "$TCR_PASSWORD"
+          test -n "$DEPLOY_HOST"
+          test -n "$DEPLOY_USER"
+          test -n "$DEPLOY_SSH_KEY"
+          test -n "$DEPLOY_KNOWN_HOSTS"
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -39,35 +55,92 @@ jobs:
           npm test
           npm run build
 
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to Tencent Cloud TCR
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.TCR_USERNAME }}
+          password: ${{ secrets.TCR_PASSWORD }}
+
+      - name: Build and push API image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          provenance: false
+          tags: ${{ env.API_IMAGE }}
+          build-args: |
+            NODE_IMAGE=public.ecr.aws/docker/library/node:24-alpine
+
+      - name: Build and push Web image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          provenance: false
+          tags: ${{ env.WEB_IMAGE }}
+          build-args: |
+            NODE_IMAGE=public.ecr.aws/docker/library/node:24-alpine
+            CADDY_IMAGE=public.ecr.aws/docker/library/caddy:2-alpine
+
       - name: Configure SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
         run: |
-          test -n "$DEPLOY_HOST"
-          test -n "$DEPLOY_USER"
-          test -n "$DEPLOY_SSH_KEY"
-          test -n "$DEPLOY_KNOWN_HOSTS"
           install -m 700 -d "$HOME/.ssh"
           printf '%s\n' "$DEPLOY_SSH_KEY" > "$HOME/.ssh/id_ed25519"
           chmod 600 "$HOME/.ssh/id_ed25519"
           printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
           chmod 600 "$HOME/.ssh/known_hosts"
 
-      - name: Upload source
+      - name: Upload Compose file and image tags
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
         run: |
           target="${DEPLOY_USER}@${DEPLOY_HOST}"
+          printf 'API_IMAGE=%s\nWEB_IMAGE=%s\n' "$API_IMAGE" "$WEB_IMAGE" > "$RUNNER_TEMP/s-mall-images.env"
           ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$target" 'mkdir -p ~/s-mall'
-          rsync -az \
-            -e 'ssh -o BatchMode=yes -o StrictHostKeyChecking=yes' \
-            --exclude='.git/' \
-            --exclude='node_modules/' \
-            --exclude='dist/' \
-            --exclude='.env*' \
-            --exclude='.venv/' \
-            --exclude='.superpowers/' \
-            --exclude='.DS_Store' \
-            ./ "$target:~/s-mall/"
+          scp -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            compose.tcr.yaml "$RUNNER_TEMP/s-mall-images.env" "$target:~/s-mall/"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$target" \
+            'cd ~/s-mall && mv s-mall-images.env .env.images.next'
 
-      - name: Build and restart application
+      - name: Log in to TCR on server
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          TCR_USERNAME: ${{ secrets.TCR_USERNAME }}
+          TCR_PASSWORD: ${{ secrets.TCR_PASSWORD }}
         run: |
           target="${DEPLOY_USER}@${DEPLOY_HOST}"
-          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$target" \
-            'cd ~/s-mall && test -f .env.production && docker compose --env-file .env.production -f compose.prod.yaml up -d --build --wait api web && docker compose --env-file .env.production -f compose.prod.yaml ps'
+          printf '%s\n%s\n' "$TCR_USERNAME" "$TCR_PASSWORD" | \
+            ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$target" \
+              'IFS= read -r username && docker login ccr.ccs.tencentyun.com --username "$username" --password-stdin'
+
+      - name: Pull and start containers
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          target="${DEPLOY_USER}@${DEPLOY_HOST}"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$target" '
+            set -eu
+            cd ~/s-mall
+            test -f .env.production
+            docker compose --env-file .env.production --env-file .env.images.next -f compose.tcr.yaml pull api web
+            docker compose --env-file .env.production --env-file .env.images.next -f compose.tcr.yaml up -d --wait api web
+            mv .env.images.next .env.images
+            docker compose --env-file .env.production --env-file .env.images -f compose.tcr.yaml ps
+          '

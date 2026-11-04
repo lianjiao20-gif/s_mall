@@ -124,11 +124,11 @@ docker compose --env-file .env.production -f compose.prod.yaml logs -f --tail=10
 
 ### GitHub Actions 自动部署
 
-`.github/workflows/deploy.yml` 在代码推送到 `main` 时自动运行，也可以在 GitHub 的 **Actions → Deploy to server → Run workflow** 手动运行。它会先执行 `npm ci`、`npm test` 和 `npm run build`，再通过 SSH/rsync 上传源码，并在服务器重建 `api`、`web` 容器。此流程使用上面的 `compose.prod.yaml` 源码部署方式；如果服务器使用 `compose.tcr.yaml`，请改用下节的镜像发布流程。
+`.github/workflows/deploy.yml` 在代码推送到 `main` 时自动运行，也可以在 GitHub 的 **Actions → Deploy images to Tencent Cloud → Run workflow** 手动运行（选择 `main`）。它会先执行 `npm ci`、`npm test` 和 `npm run build`，再用两个 Dockerfile 构建 `linux/amd64`、`linux/arm64` 镜像，以提交 SHA 为标签推送到腾讯云 TCR，最后通过 SSH 上传 `compose.tcr.yaml` 和镜像标签，让服务器拉取镜像并更新 `api`、`web` 容器。服务器无需源码或 Node.js。
 
-先按上面的步骤在服务器完成首次部署，确认 `~/s-mall/.env.production` 已配置、Docker Compose 可运行。给 Actions 准备一个只用于部署的 SSH 密钥，将公钥加入服务器部署用户的 `~/.ssh/authorized_keys`；私钥只放在 GitHub Secrets。使用可信渠道核对服务器 SSH 主机公钥指纹后，将对应的 `known_hosts` 记录也放入 Secrets。
+先按下节步骤在服务器完成 TCR 首次部署，确认 `~/s-mall/.env.production` 已配置、Docker Compose 可运行，并在 TCR 中创建 `dev-s-mall-image/s_mall_api` 和 `dev-s-mall-image/s_mall_web` 两个仓库。给 Actions 准备一个只用于部署的 SSH 密钥，将公钥加入服务器部署用户的 `~/.ssh/authorized_keys`；私钥只放在 GitHub Secrets。使用可信渠道核对服务器 SSH 主机公钥指纹后，将对应的 `known_hosts` 记录也放入 Secrets。
 
-在仓库 **Settings → Secrets and variables → Actions** 添加以下四个 Repository secrets：
+在仓库 **Settings → Secrets and variables → Actions** 添加以下六个 Repository secrets：
 
 | Secret | 内容 |
 | --- | --- |
@@ -136,8 +136,10 @@ docker compose --env-file .env.production -f compose.prod.yaml logs -f --tail=10
 | `DEPLOY_USER` | 有权运行 Docker Compose 的 SSH 用户 |
 | `DEPLOY_SSH_KEY` | 部署专用 SSH 私钥的完整内容 |
 | `DEPLOY_KNOWN_HOSTS` | 经核对的服务器 SSH `known_hosts` 记录 |
+| `TCR_USERNAME` | 腾讯云 TCR 登录用户名 |
+| `TCR_PASSWORD` | 腾讯云 TCR 登录密码或访问令牌 |
 
-工作流不会上传或覆盖服务器的 `.env.production`，也不会执行数据库重置或删除 Docker 数据卷。服务器构建镜像仍需能获取 Dockerfile 中的基础镜像。首次启用前，先确认推送到 `main` 的代码已准备好部署。
+工作流不会上传或覆盖服务器的 `.env.production`，而是在服务器的 `.env.images` 中记录当前镜像标签；只有拉取镜像、启动容器并通过健康检查后才更新这个文件。不会执行数据库重置或删除 Docker 数据卷。`compose.tcr.yaml` 与 `compose.prod.yaml` 使用相同的服务名和数据卷；在同一 `~/s-mall` 目录切换时，原有 MySQL 数据卷会保留。首次启用前，先确认推送到 `main` 的代码已准备好部署。
 
 ## 从腾讯云 TCR 拉取镜像部署
 
