@@ -135,24 +135,25 @@ docker compose --env-file .env.production -f compose.prod.yaml logs -f --tail=10
 | `DEPLOY_HOST` | 服务器公网 IP 或域名（不含 `user@`） |
 | `DEPLOY_USER` | 有权运行 Docker Compose 的 SSH 用户 |
 | `DEPLOY_SSH_KEY` | 部署专用 SSH 私钥的完整内容 |
-| `DEPLOY_KNOWN_HOSTS` | 经核对的服务器 SSH `known_hosts` 记录 |
+| `DEPLOY_KNOWN_HOSTS` | 经核对的服务器 SSH 主机公钥，或完整 `known_hosts` 记录 |
 | `TCR_USERNAME` | 腾讯云 TCR 登录用户名 |
 | `TCR_PASSWORD` | 腾讯云 TCR 登录密码或访问令牌 |
 
-若 Actions 报 `No ED25519 host key is known`，说明 `DEPLOY_KNOWN_HOSTS` 没有与 `DEPLOY_HOST` 完全对应的服务器 ED25519 主机公钥记录。先通过已信任的服务器控制台查看指纹：
+若 Actions 报 `No ED25519 host key is known` 或找不到匹配的主机记录，在腾讯云服务器控制台终端执行：
 
 ```bash
-ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
+cat /etc/ssh/ssh_host_ed25519_key.pub
 ```
 
-再在本机查询同一主机的指纹并比较（`SERVER_HOST` 要与 `DEPLOY_HOST` 的值完全一致）：
+将输出的完整一行（如下格式）复制到 GitHub 仓库的 `DEPLOY_KNOWN_HOSTS` Secret 中：
 
-```bash
-ssh-keyscan -t ed25519 SERVER_HOST 2>/dev/null | ssh-keygen -lf -
-ssh-keyscan -t ed25519 SERVER_HOST 2>/dev/null
+```text
+ssh-ed25519 AAAAC3... root@server
 ```
 
-指纹一致后，把第二条命令输出的完整 `SERVER_HOST ssh-ed25519 AAAA...` 记录填入 `DEPLOY_KNOWN_HOSTS`；不要只填指纹，也不要关闭 SSH 主机密钥校验。工作流会在构建和推送镜像前检查这条记录并尝试连接服务器。
+工作流会把这种服务器主机公钥绑定到 `DEPLOY_HOST`。也接受完整的 `HOST ssh-ed25519 AAAA...` 记录（包括哈希主机名）；完整记录中的 IP/域名必须与 `DEPLOY_HOST` 对应。有效的 ECDSA、RSA 主机公钥同样受支持。
+
+此 Secret 应填写服务器 `/etc/ssh/ssh_host_*_key.pub` 的公钥内容。若只填 `SHA256:...` 指纹、文件路径、登录用私钥或其他主机的记录，配置检查会失败并给出原因。工作流会在构建和推送镜像前检查格式并通过严格主机密钥校验连接服务器。推送新版 workflow 后运行新任务，才会使用这套兼容逻辑；对旧任务点击 Re-run 仍会使用旧版代码。
 
 工作流不会上传或覆盖服务器的 `.env.production`，而是在服务器的 `.env.images` 中记录当前镜像标签；只有拉取镜像、启动容器并通过健康检查后才更新这个文件。不会执行数据库重置或删除 Docker 数据卷。`compose.tcr.yaml` 与 `compose.prod.yaml` 使用相同的服务名和数据卷；在同一 `~/s-mall` 目录切换时，原有 MySQL 数据卷会保留。首次启用前，先确认推送到 `main` 的代码已准备好部署。
 

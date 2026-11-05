@@ -27,6 +27,9 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Test SSH host key configuration
+        run: python3 -m unittest discover -s .github/scripts -p 'test_*.py' -v
+
       - name: Check deployment secrets
         env:
           TCR_USERNAME: ${{ secrets.TCR_USERNAME }}
@@ -45,24 +48,20 @@ jobs:
 
       - name: Configure SSH
         env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
         run: |
           install -m 700 -d "$HOME/.ssh"
           printf '%s\n' "$DEPLOY_SSH_KEY" > "$HOME/.ssh/id_ed25519"
           chmod 600 "$HOME/.ssh/id_ed25519"
-          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
-          chmod 600 "$HOME/.ssh/known_hosts"
+          bash .github/scripts/prepare-known-hosts.sh "$HOME/.ssh/known_hosts"
 
       - name: Verify SSH host and access
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
         run: |
-          if ! ssh-keygen -F "$DEPLOY_HOST" -f "$HOME/.ssh/known_hosts" | grep -q 'ssh-ed25519 '; then
-            echo '::error::DEPLOY_KNOWN_HOSTS must contain the verified ssh-ed25519 host key for DEPLOY_HOST.'
-            exit 1
-          fi
           ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 \
             "${DEPLOY_USER}@${DEPLOY_HOST}" true
 
