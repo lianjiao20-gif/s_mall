@@ -139,6 +139,21 @@ docker compose --env-file .env.production -f compose.prod.yaml logs -f --tail=10
 | `TCR_USERNAME` | 腾讯云 TCR 登录用户名 |
 | `TCR_PASSWORD` | 腾讯云 TCR 登录密码或访问令牌 |
 
+若 Actions 报 `No ED25519 host key is known`，说明 `DEPLOY_KNOWN_HOSTS` 没有与 `DEPLOY_HOST` 完全对应的服务器 ED25519 主机公钥记录。先通过已信任的服务器控制台查看指纹：
+
+```bash
+ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
+```
+
+再在本机查询同一主机的指纹并比较（`SERVER_HOST` 要与 `DEPLOY_HOST` 的值完全一致）：
+
+```bash
+ssh-keyscan -t ed25519 SERVER_HOST 2>/dev/null | ssh-keygen -lf -
+ssh-keyscan -t ed25519 SERVER_HOST 2>/dev/null
+```
+
+指纹一致后，把第二条命令输出的完整 `SERVER_HOST ssh-ed25519 AAAA...` 记录填入 `DEPLOY_KNOWN_HOSTS`；不要只填指纹，也不要关闭 SSH 主机密钥校验。工作流会在构建和推送镜像前检查这条记录并尝试连接服务器。
+
 工作流不会上传或覆盖服务器的 `.env.production`，而是在服务器的 `.env.images` 中记录当前镜像标签；只有拉取镜像、启动容器并通过健康检查后才更新这个文件。不会执行数据库重置或删除 Docker 数据卷。`compose.tcr.yaml` 与 `compose.prod.yaml` 使用相同的服务名和数据卷；在同一 `~/s-mall` 目录切换时，原有 MySQL 数据卷会保留。首次启用前，先确认推送到 `main` 的代码已准备好部署。
 
 ## 从腾讯云 TCR 拉取镜像部署
