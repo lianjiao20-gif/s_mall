@@ -124,9 +124,19 @@ docker compose --env-file .env.production -f compose.prod.yaml logs -f --tail=10
 
 ### GitHub Actions 自动部署
 
-`.github/workflows/deploy.yml` 在代码推送到 `main` 时自动运行，也可以在 GitHub 的 **Actions → Deploy images to Tencent Cloud → Run workflow** 手动运行（选择 `main`）。它会先执行 `npm ci`、`npm test` 和 `npm run build`，再用两个 Dockerfile 构建 `linux/amd64`、`linux/arm64` 镜像，以提交 SHA 为标签推送到腾讯云 TCR，最后通过 SSH 上传 `compose.tcr.yaml` 和镜像标签，让服务器拉取镜像并更新 `api`、`web` 容器。服务器无需源码或 Node.js。
+`.github/workflows/deploy.yml` 在代码推送到 `main` 时自动运行，也可以在 GitHub 的 **Actions → Deploy images to Tencent Cloud → Run workflow** 手动运行（选择 `main`）。它会先执行 `npm ci`、`npm test` 和 `npm run build`，再用两个 Dockerfile 构建 `linux/amd64`、`linux/arm64` 镜像，以提交 SHA 为标签推送到腾讯云 TCR，最后通过 SSH 上传镜像标签，使用服务器已有的 Compose 文件拉取镜像并更新 `api`、`web` 容器。服务器无需源码或 Node.js。
 
-先按下节步骤在服务器完成 TCR 首次部署，确认 `~/s-mall/.env.production` 已配置、Docker Compose 可运行，并在 TCR 中创建 `dev-s-mall-image/s_mall_api` 和 `dev-s-mall-image/s_mall_web` 两个仓库。给 Actions 准备一个只用于部署的 SSH 密钥，将公钥加入服务器部署用户的 `~/.ssh/authorized_keys`；私钥只放在 GitHub Secrets。使用可信渠道核对服务器 SSH 主机公钥指纹后，将对应的 `known_hosts` 记录也放入 Secrets。
+确认服务器实际使用的部署目录和环境文件，Docker Compose 可运行，并在 TCR 中创建 `dev-s-mall-image/s_mall_api` 和 `dev-s-mall-image/s_mall_web` 两个仓库。已有商城应复用原目录和配置；首次部署可按下节步骤准备。给 Actions 准备一个只用于部署的 SSH 密钥，将公钥加入服务器部署用户的 `~/.ssh/authorized_keys`；私钥只放在 GitHub Secrets。使用可信渠道核对服务器 SSH 主机公钥指纹后，将对应的 `known_hosts` 记录也放入 Secrets。
+
+workflow 已配置为直接使用以下服务器路径，无需额外配置 GitHub 路径 Variables：
+
+| 配置 | 服务器路径 |
+| --- | --- |
+| `DEPLOY_PATH` | `/home/ubuntu/s_mall` |
+| `DEPLOY_ENV_FILE` | `/home/ubuntu/s_mall/.env.production` |
+| `DEPLOY_COMPOSE_FILE` | `/home/ubuntu/s_mall/compose.tcr.yaml` |
+
+现有 Compose 文件与生产环境文件由服务器维护。workflow 只上传本次镜像标签文件，并检查现有文件可读性和 Docker 权限。Compose 的 `api` 服务需使用 `image: ${API_IMAGE}`，`web` 服务需使用 `image: ${WEB_IMAGE}`（本仓库的 `compose.tcr.yaml` 已符合）；部署前会确认 Compose 实际解析到了本次发布的两个镜像标签，避免继续运行写死的旧版本。现有 MySQL 数据卷中的账号密码应继续使用原配置；不要为修复路径问题重新生成数据库密码。若原部署显式指定了 Compose 项目名，保持相同的 `COMPOSE_PROJECT_NAME`，以继续使用原数据卷。
 
 在仓库 **Settings → Secrets and variables → Actions** 添加以下六个 Repository secrets：
 
@@ -155,7 +165,7 @@ ssh-ed25519 AAAAC3... root@server
 
 此 Secret 应填写服务器 `/etc/ssh/ssh_host_*_key.pub` 的公钥内容。若只填 `SHA256:...` 指纹、文件路径、登录用私钥或其他主机的记录，配置检查会失败并给出原因。工作流会在构建和推送镜像前检查格式并通过严格主机密钥校验连接服务器。推送新版 workflow 后运行新任务，才会使用这套兼容逻辑；对旧任务点击 Re-run 仍会使用旧版代码。
 
-工作流不会上传或覆盖服务器的 `.env.production`，而是在服务器的 `.env.images` 中记录当前镜像标签；只有拉取镜像、启动容器并通过健康检查后才更新这个文件。不会执行数据库重置或删除 Docker 数据卷。`compose.tcr.yaml` 与 `compose.prod.yaml` 使用相同的服务名和数据卷；在同一 `~/s-mall` 目录切换时，原有 MySQL 数据卷会保留。首次启用前，先确认推送到 `main` 的代码已准备好部署。
+工作流使用现有服务器配置，在部署目录的 `.env.images` 中记录当前镜像标签；只有拉取镜像、启动容器并通过健康检查后才更新这个文件。不会执行数据库重置或删除 Docker 数据卷。手动管理 Actions 部署的版本时，在 `/home/ubuntu/s_mall` 目录执行 `docker compose --env-file .env.production --env-file .env.images -f compose.tcr.yaml` 并追加所需的 `ps`、`pull` 或 `up` 等命令。首次启用前，先确认推送到 `main` 的代码已准备好部署。
 
 ## 从腾讯云 TCR 拉取镜像部署
 

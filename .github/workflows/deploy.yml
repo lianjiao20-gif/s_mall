@@ -21,6 +21,9 @@ jobs:
       REGISTRY: ccr.ccs.tencentyun.com
       API_IMAGE: ccr.ccs.tencentyun.com/dev-s-mall-image/s_mall_api:${{ github.sha }}
       WEB_IMAGE: ccr.ccs.tencentyun.com/dev-s-mall-image/s_mall_web:${{ github.sha }}
+      DEPLOY_PATH: /home/ubuntu/s_mall
+      DEPLOY_ENV_FILE: /home/ubuntu/s_mall/.env.production
+      DEPLOY_COMPOSE_FILE: /home/ubuntu/s_mall/compose.tcr.yaml
     steps:
       - name: Check out source
         uses: actions/checkout@v6
@@ -54,13 +57,35 @@ jobs:
           chmod 600 "$HOME/.ssh/id_ed25519"
           bash .github/scripts/prepare-known-hosts.sh "$HOME/.ssh/known_hosts"
 
-      - name: Verify SSH host and access
+      - name: Verify SSH and server configuration
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
         run: |
+          printf -v remote_args '%q %q %q' "$DEPLOY_PATH" "$DEPLOY_ENV_FILE" "$DEPLOY_COMPOSE_FILE"
           ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 \
-            "${DEPLOY_USER}@${DEPLOY_HOST}" true
+            "${DEPLOY_USER}@${DEPLOY_HOST}" "bash -s -- $remote_args" <<'REMOTE'
+            set -eu
+            cd "$HOME"
+            if ! cd -- "$1"; then
+              echo '::error::Cannot enter /home/ubuntu/s_mall. Check the directory and DEPLOY_USER permissions.' >&2
+              exit 1
+            fi
+            for file in "$2" "$3"; do
+              if [ ! -r "$file" ]; then
+                printf '::error::Missing or unreadable server configuration: %s\n' "$file" >&2
+                exit 1
+              fi
+            done
+            if ! docker compose version >/dev/null 2>&1; then
+              echo '::error::Docker Compose is unavailable for DEPLOY_USER.' >&2
+              exit 1
+            fi
+            if ! docker info >/dev/null 2>&1; then
+              echo '::error::Docker is stopped or DEPLOY_USER cannot access its daemon.' >&2
+              exit 1
+            fi
+          REMOTE
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -112,18 +137,23 @@ jobs:
             NODE_IMAGE=public.ecr.aws/docker/library/node:24-alpine
             CADDY_IMAGE=public.ecr.aws/docker/library/caddy:2-alpine
 
-      - name: Upload Compose file and image tags
+      - name: Upload image tags
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
         run: |
           target="${DEPLOY_USER}@${DEPLOY_HOST}"
           printf 'API_IMAGE=%s\nWEB_IMAGE=%s\n' "$API_IMAGE" "$WEB_IMAGE" > "$RUNNER_TEMP/s-mall-images.env"
-          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$target" 'mkdir -p ~/s-mall'
           scp -o BatchMode=yes -o StrictHostKeyChecking=yes \
-            compose.tcr.yaml "$RUNNER_TEMP/s-mall-images.env" "$target:~/s-mall/"
+            "$RUNNER_TEMP/s-mall-images.env" "$target:$DEPLOY_PATH/"
+          printf -v remote_args '%q' "$DEPLOY_PATH"
           ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$target" \
-            'cd ~/s-mall && mv s-mall-images.env .env.images.next'
+            "bash -s -- $remote_args" <<'REMOTE'
+            set -eu
+            cd "$HOME"
+            cd -- "$1"
+            mv s-mall-images.env .env.images.next
+          REMOTE
 
       - name: Log in to TCR on server
         env:
@@ -143,12 +173,30 @@ jobs:
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
         run: |
           target="${DEPLOY_USER}@${DEPLOY_HOST}"
-          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$target" '
+          printf -v remote_args '%q %q %q %q %q' "$DEPLOY_PATH" "$DEPLOY_ENV_FILE" "$DEPLOY_COMPOSE_FILE" "$API_IMAGE" "$WEB_IMAGE"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$target" "bash -s -- $remote_args" <<'REMOTE'
             set -eu
-            cd ~/s-mall
-            test -f .env.production
-            docker compose --env-file .env.production --env-file .env.images.next -f compose.tcr.yaml pull api web
-            docker compose --env-file .env.production --env-file .env.images.next -f compose.tcr.yaml up -d --wait api web
+            cd "$HOME"
+            cd -- "$1"
+            for file in "$2" "$3" .env.images.next; do
+              if [ ! -r "$file" ]; then
+                printf '::error::Missing or unreadable deployment file: %s\n' "$file" >&2
+                exit 1
+              fi
+            done
+            printf 'Validating Compose configuration\n'
+            docker compose --env-file "$2" --env-file .env.images.next -f "$3" config --quiet
+            resolved_images=$(docker compose --env-file "$2" --env-file .env.images.next -f "$3" config --images)
+            for expected_image in "$4" "$5"; do
+              if ! printf '%s\n' "$resolved_images" | grep -Fxq -- "$expected_image"; then
+                echo '::error::Server Compose must use ${API_IMAGE} and ${WEB_IMAGE} for the application images so this release can be deployed.' >&2
+                exit 1
+              fi
+            done
+            printf 'Pulling API and Web images\n'
+            docker compose --env-file "$2" --env-file .env.images.next -f "$3" pull api web
+            printf 'Starting containers and waiting for health checks\n'
+            docker compose --env-file "$2" --env-file .env.images.next -f "$3" up -d --wait api web
             mv .env.images.next .env.images
-            docker compose --env-file .env.production --env-file .env.images -f compose.tcr.yaml ps
-          '
+            docker compose --env-file "$2" --env-file .env.images -f "$3" ps
+          REMOTE
