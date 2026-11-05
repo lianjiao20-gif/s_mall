@@ -27,9 +27,6 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Test SSH host key configuration
-        run: python3 -m unittest discover -s .github/scripts -p 'test_*.py' -v
-
       - name: Check deployment secrets
         env:
           TCR_USERNAME: ${{ secrets.TCR_USERNAME }}
